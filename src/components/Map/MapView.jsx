@@ -1,23 +1,53 @@
 // src/components/Map/MapView.jsx
-import { useRef, useEffect, useState } from "react";
-import ReactDOMServer from "react-dom/server"; // Importante
-import mapboxgl from "mapbox-gl";
+import React, { useRef, useEffect, useState, useCallback } from "react";
+import ReactDOMServer from "react-dom/server";
+import mapboxgl from "mapbox-gl"; // mapboxgl ya incluye GeolocateControl
 import "mapbox-gl/dist/mapbox-gl.css";
 import "./MapView.css";
 
-// Importa tus componentes SVG
-import { AR } from "../../assets/icons/AR";
-import { Audio } from "../../assets/icons/Audio";
+import { AR as ARÍcono } from "../../assets/icons/AR";
+import { Audio as AudioÍcono } from "../../assets/icons/Audio";
 
-const MapView = ({ mapboxToken, points, onSelectPoint, currentlyPlayingAudioPointId, selectedPointForPopup }) => {
+const MapView = ({
+   mapboxToken,
+   points,
+   onMarkerClick,
+   onPopupAction,
+   currentlyPlayingAudioPointId,
+   selectedPointForPopup,
+   isPlayingAudioForSelectedPoint,
+}) => {
    const mapContainerRef = useRef(null);
    const mapRef = useRef(null);
-   const [markers, setMarkers] = useState([]);
-   const [popups, setPopups] = useState([]);
+   const markersRef = useRef({});
+   const popupsRef = useRef({});
+   const buttonListenersRef = useRef({});
+   const geolocateControlRef = useRef(null); // Para guardar la instancia del control de geolocalización
+   const [mapLoaded, setMapLoaded] = useState(false);
 
+   const updatePopupButtonText = useCallback(
+      /* ... (sin cambios) ... */ (pointId, isPlaying) => {
+         const popupInstance = popupsRef.current[pointId];
+         if (popupInstance && popupInstance.isOpen()) {
+            const popupElement = popupInstance.getElement();
+            const button = popupElement?.querySelector(".popup-action-button");
+            if (button) {
+               const point = points.find((p) => p.id === pointId);
+               if (point?.type === "audio") {
+                  button.textContent = isPlaying ? "Detener Sonido" : "Reproducir Sonido";
+               } else if (point?.type === "ar") {
+                  button.textContent = "Iniciar AR";
+               }
+            }
+         }
+      },
+      [points]
+   );
+
+   // Efecto para inicializar el mapa, marcadores, popups y control de geolocalización
    useEffect(() => {
-      if (!points) {
-         console.warn("MapView: No points data provided.");
+      if (mapRef.current || !points || points.length === 0) {
+         if (!mapboxToken) console.warn("MapView: Mapbox token no proporcionado.");
          return;
       }
 
@@ -25,49 +55,69 @@ const MapView = ({ mapboxToken, points, onSelectPoint, currentlyPlayingAudioPoin
       const map = new mapboxgl.Map({
          container: mapContainerRef.current,
          style: "mapbox://styles/mapbox/streets-v11",
-         center: points.length > 0 ? points[0].coordinates : [-74.006, 40.7128],
+         center: points[0].coordinates,
          zoom: 12,
       });
       mapRef.current = map;
 
+      // --- INICIO: Añadir GeolocateControl ---
+      const geolocate = new mapboxgl.GeolocateControl({
+         positionOptions: {
+            enableHighAccuracy: true, // Intenta obtener la ubicación más precisa
+         },
+         trackUserLocation: true, // Sigue al usuario en el mapa
+         showUserHeading: true, // Muestra la dirección a la que mira el usuario (si el dispositivo lo soporta)
+         showUserLocation: true, // Muestra el punto de ubicación del usuario
+         fitBoundsOptions: {
+            maxZoom: 15, // Zoom máximo al centrar en el usuario
+         },
+      });
+      map.addControl(geolocate, "top-right"); // Añade el control al mapa (puedes cambiar la posición)
+      geolocateControlRef.current = geolocate; // Guardar referencia si necesitas interactuar con él
+
+      // Opcional: Escuchar eventos del GeolocateControl
+      geolocate.on("geolocate", (e) => {
+         console.log("Geolocalización exitosa:", e.coords);
+         // Aquí podrías hacer algo con la ubicación del usuario, como guardarla en un estado,
+         // o calcular la distancia a los puntos de interés.
+      });
+      geolocate.on("error", (e) => {
+         console.error("Error de geolocalización:", e.message);
+         // Informar al usuario que la geolocalización falló o no está disponible.
+         // Esto puede pasar si el usuario deniega el permiso, o si el navegador no soporta la API.
+         // También si no estás en un contexto seguro (HTTPS), excepto localhost.
+      });
+      // --- FIN: Añadir GeolocateControl ---
+
       map.on("load", () => {
-         const newMarkers = [];
-         const newPopups = [];
+         // Disparar la geolocalización automáticamente al cargar el mapa (opcional)
+         // geolocate.trigger(); // Descomenta si quieres que intente localizar al usuario al inicio
 
          points.forEach((point) => {
+            // ... (código de creación de marcadores y popups sin cambios) ...
             if (!point.coordinates || point.coordinates.length !== 2) {
-               console.error("MapView: Invalid coordinates for point", point);
+               console.error("MapView: Coordenadas inválidas para el punto", point);
                return;
             }
 
             const el = document.createElement("div");
-            el.className = "custom-marker-wrapper"; // Un wrapper para el SVG
-
-            let iconHtmlString;
+            el.className = "custom-marker-wrapper";
             const iconSize = 32;
+            let iconHtmlString = "";
+
             if (point.type === "ar") {
-               // Renderiza el componente JSX a un string HTML
-               iconHtmlString = ReactDOMServer.renderToString(
-                  <AR size={iconSize} color="#007bff" strokeWidth={1.5} /> // Ajusta props como necesites
-               );
+               iconHtmlString = ReactDOMServer.renderToString(<ARÍcono size={iconSize} color="#007bff" strokeWidth={1.5} />);
                el.title = `AR: ${point.name}`;
             } else if (point.type === "audio") {
-               iconHtmlString = ReactDOMServer.renderToString(<Audio size={iconSize} color="#28a745" />);
+               iconHtmlString = ReactDOMServer.renderToString(<AudioÍcono size={iconSize} color="#28a745" />);
                el.title = `Audio: ${point.name}`;
             }
-
-            el.innerHTML = iconHtmlString; // Inserta el SVG renderizado
-
-            // Añade un estilo base al wrapper si es necesario,
-            // aunque el SVG mismo define su tamaño
-            el.style.width = "auto"; // El SVG ya tiene tamaño
-            el.style.height = "auto";
-            el.style.cursor = "pointer";
+            el.innerHTML = iconHtmlString;
 
             const markerInstance = new mapboxgl.Marker(el).setLngLat(point.coordinates).addTo(map);
-            newMarkers.push({ id: point.id, instance: markerInstance, type: point.type, el: el }); // Guardar 'el' para estilizar
+            markersRef.current[point.id] = markerInstance;
 
-            const popupContent = `
+            const popupContentHTML = `
           <div class="mapboxgl-popup-custom-content">
             <h4>${point.name}</h4>
             <p>${point.description}</p>
@@ -76,86 +126,128 @@ const MapView = ({ mapboxToken, points, onSelectPoint, currentlyPlayingAudioPoin
             </button>
           </div>
         `;
-
-            const popup = new mapboxgl.Popup({ offset: 25, closeButton: true, closeOnClick: false }).setHTML(popupContent);
-
-            markerInstance.setPopup(popup);
-            newPopups.push({ id: point.id, instance: popup });
+            const popupInstance = new mapboxgl.Popup({
+               offset: 25,
+               closeButton: true,
+               closeOnClick: false,
+            }).setHTML(popupContentHTML);
+            popupsRef.current[point.id] = popupInstance;
 
             markerInstance.getElement().addEventListener("click", (e) => {
                e.stopPropagation();
-               popups.forEach((p) => {
-                  if (p.id !== point.id && p.instance.isOpen()) {
-                     p.instance.remove();
-                  }
-               });
-               if (!popup.isOpen()) {
-                  popup.setLngLat(point.coordinates).addTo(map);
-               }
-            });
-
-            popup.on("open", () => {
-               const button = popup.getElement().querySelector(".popup-action-button");
-               if (button) {
-                  const newButton = button.cloneNode(true);
-                  button.parentNode.replaceChild(newButton, button);
-                  newButton.addEventListener("click", () => {
-                     onSelectPoint(point);
-                     popup.remove();
-                  });
-               }
+               onMarkerClick(point);
             });
          });
-         setMarkers(newMarkers);
-         setPopups(newPopups);
+         setMapLoaded(true);
+         console.log("MapView: Mapa y elementos inicializados.");
       });
 
-      map.on("error", (e) => console.error("Mapbox error:", e.error));
+      map.on("error", (e) => console.error("Mapbox GL Error:", e.error?.message || e));
 
+      // Limpieza al desmontar MapView
       return () => {
-         popups.forEach((p) => {
-            if (p.instance.isOpen()) p.instance.remove();
+         console.log("MapView: Desmontando MapView y limpiando recursos de Mapbox.");
+         if (geolocateControlRef.current && mapRef.current && mapRef.current.hasControl(geolocateControlRef.current)) {
+            // mapRef.current.removeControl(geolocateControlRef.current); // No es estrictamente necesario si el mapa se destruye
+         }
+         Object.values(buttonListenersRef.current).forEach(({ button, handler }) => {
+            if (button && handler) button.removeEventListener("click", handler);
          });
-         markers.forEach((m) => m.instance.remove());
+         buttonListenersRef.current = {};
+
+         Object.values(popupsRef.current).forEach((p) => {
+            if (p.isOpen()) p.remove();
+         });
+         Object.values(markersRef.current).forEach((m) => m.remove());
+         popupsRef.current = {};
+         markersRef.current = {};
          if (mapRef.current) {
             mapRef.current.remove();
             mapRef.current = null;
          }
+         setMapLoaded(false);
       };
-   }, [mapboxToken, points, onSelectPoint]);
+   }, [mapboxToken, points, onMarkerClick]);
 
+   // ... (useEffect para selectedPointForPopup sin cambios en su lógica interna, pero puede
+   //      tener `onPopupAction` y `updatePopupButtonText` como dependencias si vienen de App.jsx
+   //      y pueden cambiar, aunque con useCallback deberían ser estables)
    useEffect(() => {
-      if (selectedPointForPopup && popups.length > 0 && mapRef.current) {
-         const associatedPopup = popups.find((p) => p.id === selectedPointForPopup.id);
-         if (associatedPopup && !associatedPopup.instance.isOpen()) {
-            popups.forEach((p) => {
-               if (p.id !== selectedPointForPopup.id && p.instance.isOpen()) {
-                  p.instance.remove();
+      if (!mapLoaded || !mapRef.current) return;
+
+      Object.entries(popupsRef.current).forEach(([pointId, p]) => {
+         const isSelected = selectedPointForPopup && pointId === selectedPointForPopup.id;
+         if (!isSelected) {
+            if (p.isOpen()) {
+               p.remove();
+            }
+            const listenerInfo = buttonListenersRef.current[pointId];
+            if (listenerInfo) {
+               listenerInfo.button.removeEventListener("click", listenerInfo.handler);
+               delete listenerInfo.button.dataset.listenerAttached;
+               delete buttonListenersRef.current[pointId];
+            }
+         }
+      });
+
+      if (selectedPointForPopup) {
+         const pointId = selectedPointForPopup.id;
+         const popupInstance = popupsRef.current[pointId];
+
+         if (popupInstance) {
+            if (!popupInstance.isOpen()) {
+               popupInstance.setLngLat(selectedPointForPopup.coordinates).addTo(mapRef.current);
+               const currentBounds = mapRef.current.getBounds();
+               if (!currentBounds.contains(selectedPointForPopup.coordinates)) {
+                  mapRef.current.flyTo({
+                     center: selectedPointForPopup.coordinates,
+                     zoom: Math.max(mapRef.current.getZoom(), 14),
+                     essential: true,
+                  });
                }
-            });
-            mapRef.current.flyTo({ center: selectedPointForPopup.coordinates, zoom: 15 });
-            associatedPopup.instance.setLngLat(selectedPointForPopup.coordinates).addTo(mapRef.current);
+            }
+
+            updatePopupButtonText(pointId, isPlayingAudioForSelectedPoint && selectedPointForPopup.type === "audio");
+
+            const popupElement = popupInstance.getElement();
+            const button = popupElement?.querySelector(".popup-action-button");
+
+            if (button && !button.dataset.listenerAttached) {
+               const handleButtonClick = (event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onPopupAction(selectedPointForPopup);
+               };
+               button.addEventListener("click", handleButtonClick);
+               button.dataset.listenerAttached = "true";
+               buttonListenersRef.current[pointId] = { button, handler: handleButtonClick };
+            }
          }
       }
-   }, [selectedPointForPopup, popups]);
+   }, [mapLoaded, selectedPointForPopup, isPlayingAudioForSelectedPoint, onPopupAction, updatePopupButtonText, points]);
 
+   // ... (useEffect para currentlyPlayingAudioPointId sin cambios)
    useEffect(() => {
-      markers.forEach((markerData) => {
-         const markerElementWrapper = markerData.el; // Usar el 'el' guardado
+      if (!mapLoaded || !points || points.length === 0) return;
+
+      Object.entries(markersRef.current).forEach(([pointId, markerInstance]) => {
+         const markerElementWrapper = markerInstance.getElement();
          if (markerElementWrapper) {
-            // Asegurarse de que el elemento existe
-            if (markerData.type === "audio") {
-               if (markerData.id === currentlyPlayingAudioPointId) {
+            const point = points.find((p) => p.id === pointId);
+            if (point?.type === "audio") {
+               if (pointId === currentlyPlayingAudioPointId) {
                   markerElementWrapper.classList.add("playing-svg");
                } else {
                   markerElementWrapper.classList.remove("playing-svg");
                }
+            } else {
+               markerElementWrapper.classList.remove("playing-svg");
             }
          }
       });
-   }, [currentlyPlayingAudioPointId, markers]);
+   }, [mapLoaded, currentlyPlayingAudioPointId, points]);
 
-   return <div ref={mapContainerRef} style={{ width: "100%", height: "100vh" }} />;
+   return <div ref={mapContainerRef} className="map-container-wrapper" style={{ width: "100%", height: "100vh" }} />;
 };
 
 export default MapView;

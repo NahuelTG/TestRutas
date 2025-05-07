@@ -20,8 +20,8 @@
     "description": "Observa este monumento en Realidad Aumentada.",
     "type": "ar",
     "ar": {
-      "targetSrc": "/assets/targets/monumento_target.mind",
-      "modelSrc": "/assets/models/monumento_modelo.glb",
+      "targetSrc": "/src/assets/targets/monumento_target.mind",
+      "modelSrc": "/src/assets/models/monumento_modelo.glb",
       "scale": "0.5 0.5 0.5",
       "position": "0 0 -0.2"
     }

@@ -1,71 +1,141 @@
-// src/App.jsx
-import { useState, useEffect } from "react";
-import { Howl } from "howler"; // Importar Howl directamente
-import MapView from "./components/Map/MapView";
-import ARScene from "./components/AR/ARScene";
-import pointsData from "./data/pointsData.json";
-import PWABadge from "./PWABadge.jsx";
+import { useState, useCallback, useEffect } from "react";
+import { Howl } from "howler";
+import MapView from "./components/Map/MapView"; // Ajusta la ruta
+import ARScene from "./components/AR/ARScene"; // Ajusta la ruta
+import pointsData from "./data/pointsData.json"; // Ajusta la ruta
+import PWABadge from "./PWABadge.jsx"; // Si lo usas
 import "./App.css";
 
-const MAPBOX_TOKEN = "pk.eyJ1IjoibmFodWVsdGciLCJhIjoiY21hZWJlOXA5MDYxdjJpb2NvcGZvdnNuYiJ9.EccHdk-XgOfjB2Yc43obng"; // ¡RECUERDA PONER TU TOKEN!
+const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN || "TU_TOKEN_DE_FALLBACK_SI_NO_HAY_ENV";
+
+if (MAPBOX_TOKEN === "TU_TOKEN_DE_FALLBACK_SI_NO_HAY_ENV" || !MAPBOX_TOKEN) {
+   console.warn("App.jsx: Mapbox token no configurado. Por favor, establece VITE_MAPBOX_ACCESS_TOKEN en tu archivo .env");
+}
 
 function App() {
    const [currentView, setCurrentView] = useState("map");
-   const [selectedPoint, setSelectedPoint] = useState(null);
+   const [pointForPopup, setPointForPopup] = useState(null); // Punto para el cual mostrar el popup
+   const [activeActionPoint, setActiveActionPoint] = useState(null); // Punto para el cual ejecutar la acción AR/Audio
+
    const [audioInstance, setAudioInstance] = useState(null);
+   const [isPlayingAudioForPointId, setIsPlayingAudioForPointId] = useState(null);
 
-   // Detener y descargar audio si está activo
-   const stopAndUnloadAudio = () => {
-      if (audioInstance) {
-         audioInstance.stop();
-         audioInstance.unload();
-         setAudioInstance(null);
-         console.log("Audio detenido y descargado");
-      }
-   };
+   const stopAndUnloadAudio = useCallback(
+      (notifyPlayingState = true) => {
+         if (audioInstance) {
+            console.log("App.jsx: Deteniendo y descargando audio.");
+            audioInstance.stop();
+            audioInstance.unload(); // Importante para liberar recursos
+            setAudioInstance(null);
+            if (notifyPlayingState) {
+               setIsPlayingAudioForPointId(null);
+            }
+         }
+      },
+      [audioInstance]
+   );
 
+   // Limpieza general del audio si el componente App se desmontara
    useEffect(() => {
-      // Limpieza general del audio al desmontar App (aunque improbable aquí)
       return () => {
-         stopAndUnloadAudio();
+         if (audioInstance) {
+            stopAndUnloadAudio(true);
+         }
       };
-   }, [audioInstance]); // Se ejecutará si audioInstance cambia
+   }, [audioInstance, stopAndUnloadAudio]);
 
-   const handleSelectPoint = (point) => {
-      stopAndUnloadAudio(); // Detener cualquier audio anterior
+   const handleMarkerClick = useCallback((point) => {
+      console.log("App.jsx: Clic en MARCADOR, estableciendo pointForPopup:", point.id);
+      setPointForPopup(point);
+      // No se ejecuta ninguna acción aquí, solo se muestra el popup
+   }, []);
 
-      setSelectedPoint(point); // Establecer el nuevo punto seleccionado
+   const handlePopupAction = useCallback(
+      (point) => {
+         console.log("App.jsx: Clic en BOTÓN del POPUP para:", point.id);
+         setActiveActionPoint(point); // Marcar este punto para la acción
+         // setPointForPopup(point); // Asegurar que el popup correcto sigue activo (ya debería estarlo)
 
-      if (point.type === "ar") {
-         setCurrentView("ar");
-      } else if (point.type === "audio") {
-         setCurrentView("map"); // Asegurarse de estar en la vista de mapa para audio
-         const sound = new Howl({
-            src: [point.audioSrc],
-            html5: true,
-            onload: () => console.log(`Audio ${point.audioSrc} cargado`),
-            onplay: () => console.log(`Reproduciendo ${point.audioSrc}`),
-            onend: () => {
-               console.log(`Audio ${point.audioSrc} finalizado`);
-               setSelectedPoint((prevPoint) => (prevPoint?.id === point.id ? null : prevPoint)); // Deseleccionar solo si es el mismo punto
-               setAudioInstance(null);
-            },
-            onloaderror: (id, err) => console.error("Error al cargar audio:", err, point.audioSrc),
-            onplayerror: (id, err) => console.error("Error al reproducir audio:", err),
-         });
-         sound.play();
-         setAudioInstance(sound);
-      }
-   };
+         if (point.type === "audio") {
+            if (isPlayingAudioForPointId === point.id && audioInstance) {
+               console.log("App.jsx: Deteniendo audio (toggle) para:", point.name);
+               stopAndUnloadAudio(true);
+               // No cambiamos pointForPopup aquí, para que el popup siga abierto y el texto del botón se actualice.
+            } else {
+               // Si hay otro audio sonando, detenerlo
+               if (audioInstance) {
+                  stopAndUnloadAudio(false); // Detener sin afectar isPlayingAudioForPointId inmediatamente
+               }
+               setCurrentView("map"); // Asegurar que estamos en la vista del mapa
+               console.log("App.jsx: Intentando reproducir audio para:", point.name, "src:", point.audioSrc);
 
-   const handleCloseAR = () => {
+               const sound = new Howl({
+                  src: [point.audioSrc],
+                  html5: true, // Recomendado para compatibilidad web/móvil
+                  volume: 1.0,
+                  onload: () => {
+                     console.log(`App.jsx: Audio ${point.audioSrc} CARGADO.`);
+                     sound.play();
+                     setIsPlayingAudioForPointId(point.id); // Actualizar estado al reproducir
+                  },
+                  onplayerror: (id, err) => {
+                     console.error(`App.jsx: ERROR AL REPRODUCIR audio ID ${id}:`, err);
+                     setIsPlayingAudioForPointId(null);
+                     setAudioInstance(null);
+                     if (pointForPopup?.id === point.id) setPointForPopup(null); // Cerrar popup si falla
+                     setActiveActionPoint(null);
+                  },
+                  onloaderror: (id, err) => {
+                     console.error(`App.jsx: ERROR AL CARGAR audio ID ${id}:`, err);
+                     setIsPlayingAudioForPointId(null);
+                     setAudioInstance(null);
+                     if (pointForPopup?.id === point.id) setPointForPopup(null); // Cerrar popup si falla
+                     setActiveActionPoint(null);
+                  },
+                  onend: () => {
+                     console.log(`App.jsx: Audio ${point.audioSrc} finalizado.`);
+                     setIsPlayingAudioForPointId(null);
+                     setAudioInstance(null);
+                     if (pointForPopup?.id === point.id) setPointForPopup(null); // Cerrar popup al finalizar
+                     setActiveActionPoint(null);
+                  },
+                  onstop: () => {
+                     // Se llama cuando se usa .stop()
+                     console.log(`App.jsx: Audio ${point.audioSrc} detenido (onstop).`);
+                     // setIsPlayingAudioForPointId(null) ya se maneja en stopAndUnloadAudio
+                  },
+               });
+               setAudioInstance(sound);
+            }
+         } else if (point.type === "ar") {
+            if (audioInstance) {
+               stopAndUnloadAudio(true);
+            }
+            setIsPlayingAudioForPointId(null);
+            setCurrentView("ar"); // Cambia a la vista AR
+            // El popup se irá porque MapView se desmonta/oculta.
+            // No es necesario setPointForPopup(null) aquí si la vista cambia.
+         }
+      },
+      [audioInstance, isPlayingAudioForPointId, stopAndUnloadAudio, pointForPopup]
+   );
+
+   const handleCloseAR = useCallback(() => {
       setCurrentView("map");
-      // No necesariamente limpiamos selectedPoint aquí, podría ser útil mantenerlo
-      // para mostrar info en el mapa, o sí, dependiendo de la UX deseada.
-      // setSelectedPoint(null); // Descomentar si quieres limpiar la selección al cerrar AR
+      setPointForPopup(null); // Cerrar cualquier popup al volver de AR
+      setActiveActionPoint(null); // Limpiar el punto de acción AR
+   }, []);
 
-      // La limpieza de MindAR (cámara, etc.) debería ocurrir en ARScene.jsx
-   };
+   if (!MAPBOX_TOKEN || MAPBOX_TOKEN === "TU_TOKEN_DE_FALLBACK_SI_NO_HAY_ENV") {
+      return (
+         <div style={{ padding: "20px", textAlign: "center", fontSize: "1.2em" }}>
+            Error: El token de acceso de Mapbox no está configurado correctamente.
+            <br />
+            Por favor, asegúrate de tener la variable de entorno <code>VITE_MAPBOX_ACCESS_TOKEN</code> definida en tu archivo{" "}
+            <code>.env</code>.
+         </div>
+      );
+   }
 
    return (
       <div className="App">
@@ -73,17 +143,15 @@ function App() {
             <MapView
                mapboxToken={MAPBOX_TOKEN}
                points={pointsData}
-               onSelectPoint={handleSelectPoint}
-               currentlyPlayingAudioPointId={audioInstance && selectedPoint?.type === "audio" ? selectedPoint.id : null}
-               selectedPointForPopup={selectedPoint} // Para mantener popup abierto o mostrar info
+               onMarkerClick={handleMarkerClick}
+               onPopupAction={handlePopupAction}
+               currentlyPlayingAudioPointId={isPlayingAudioForPointId}
+               selectedPointForPopup={pointForPopup}
+               isPlayingAudioForSelectedPoint={pointForPopup?.type === "audio" && isPlayingAudioForPointId === pointForPopup?.id}
             />
          )}
-
-         {currentView === "ar" && selectedPoint && selectedPoint.type === "ar" && (
-            <ARScene
-               pointData={selectedPoint.ar} // Pasas selectedPoint.ar
-               onClose={handleCloseAR}
-            />
+         {currentView === "ar" && activeActionPoint && activeActionPoint.type === "ar" && (
+            <ARScene pointData={activeActionPoint.ar} onClose={handleCloseAR} />
          )}
          <PWABadge />
       </div>

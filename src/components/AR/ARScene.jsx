@@ -10,96 +10,125 @@ const ARScene = ({ pointData, onClose }) => {
       const sceneEl = sceneRef.current;
       let mindARSystem = null;
 
-      if (sceneEl && pointData) {
-         // Esperar a que la escena esté cargada para acceder a los sistemas
-         sceneEl.addEventListener("loaded", () => {
-            mindARSystem = sceneEl.systems["mindar-image-system"];
-            arSystemRef.current = mindARSystem; // Guardar para cleanup
-            // autoStart está en true, así que MindAR debería iniciarse solo.
-            // Podrías añadir lógica aquí si necesitas iniciar/pausar manualmente
-            console.log("A-Frame scene loaded, MindAR system:", mindARSystem);
-         });
-
-         // Si ya está cargada (por ejemplo, si pointData cambia pero la escena persiste)
-         if (sceneEl.hasLoaded) {
+      const initializeMindAR = () => {
+         if (sceneEl?.systems && sceneEl.systems["mindar-image-system"]) {
             mindARSystem = sceneEl.systems["mindar-image-system"];
             arSystemRef.current = mindARSystem;
-            // Si el sistema ya estaba corriendo y cambias de target, podrías necesitar reiniciarlo o actualizarlo.
-            // Por ahora, asumimos que el cambio de pointData implica un nuevo montaje o que MindAR maneja el cambio de targetSrc.
-         }
-      }
-
-      return () => {
-         // Limpieza cuando el componente se desmonta o pointData cambia (forzando re-render)
-         const arSystemToStop = arSystemRef.current || sceneEl?.systems["mindar-image-system"];
-         if (arSystemToStop) {
-            if (arSystemToStop.running) {
-               arSystemToStop.stop(); // Detiene el video y el tracking
-               console.log("MindAR system stopped.");
-            }
-            // También es importante detener el stream de la cámara
-            if (arSystemToStop.video) {
-               const stream = arSystemToStop.video.srcObject;
-               if (stream) {
-                  const tracks = stream.getTracks();
-                  tracks.forEach((track) => track.stop());
-                  console.log("Camera stream stopped by ARScene cleanup.");
-               }
-            }
-         }
-         if (sceneEl) {
-            // Quitar listeners si los añadiste
-            // sceneEl.removeEventListener('loaded', ...);
+            console.log("ARScene: MindAR system initialized/found:", mindARSystem);
+            // autoStart: true debería manejar el inicio.
+            // Si uiLoading/uiScanning sigue visible, podrías intentar ocultarlo aquí después de un breve delay
+            // o cuando el target sea detectado por primera vez.
+         } else if (sceneEl) {
+            // Si el sistema no está listo inmediatamente, reintentar o esperar 'loaded'
+            console.warn("ARScene: MindAR system not immediately available. Waiting for 'loaded' or re-check.");
          }
       };
-      // La dependencia de pointData.targetSrc asegura que si el target cambia,
-      // el efecto se re-ejecuta.
-   }, [pointData?.targetSrc]); // Depender de algo específico de pointData que cambie
+
+      if (sceneEl && pointData) {
+         if (sceneEl.hasLoaded) {
+            initializeMindAR();
+         } else {
+            sceneEl.addEventListener("loaded", initializeMindAR, { once: true });
+         }
+
+         // Para ocultar la UI de MindAR una vez que el tracking comienza (opcional)
+         const targetFoundListener = () => {
+            console.log("ARScene: Target found, attempting to hide MindAR UI.");
+            const uiLoading = document.querySelector(".mindar-ui-overlay.mindar-ui-loading");
+            const uiScanning = document.querySelector(".mindar-ui-overlay.mindar-ui-scanning");
+            if (uiLoading) uiLoading.style.display = "none";
+            if (uiScanning) uiScanning.style.display = "none";
+         };
+         sceneEl.addEventListener("mindar-image-target-found", targetFoundListener);
+
+         // Manejo de errores de MindAR
+         const handleARError = (event) => {
+            console.error("ARScene: MindAR Error:", event.detail);
+         };
+         sceneEl.addEventListener("mindar-image-target-error", handleARError);
+
+         return () => {
+            console.log("ARScene: Cleanup initiated.");
+            sceneEl.removeEventListener("loaded", initializeMindAR);
+            sceneEl.removeEventListener("mindar-image-target-found", targetFoundListener);
+            sceneEl.removeEventListener("mindar-image-target-error", handleARError);
+
+            const arSystemToStop = arSystemRef.current || sceneEl?.systems["mindar-image-system"];
+            if (arSystemToStop) {
+               if (arSystemToStop.running) {
+                  console.log("ARScene: Stopping MindAR system.");
+                  arSystemToStop.stop(); // Detiene el video y el tracking
+               }
+               // Detener explícitamente el stream de la cámara
+               if (arSystemToStop.video && arSystemToStop.video.srcObject) {
+                  const stream = arSystemToStop.video.srcObject;
+                  const tracks = stream.getTracks();
+                  tracks.forEach((track) => {
+                     track.stop();
+                     console.log("ARScene: Camera track stopped.");
+                  });
+                  arSystemToStop.video.srcObject = null; // Liberar el objeto
+               }
+               arSystemRef.current = null;
+            }
+            // Forzar la eliminación de la UI de MindAR del DOM si persiste
+            // Esto es un poco más agresivo, usar con precaución.
+            setTimeout(() => {
+               const mindarOverlays = document.querySelectorAll(".mindar-ui-overlay");
+               mindarOverlays.forEach((overlay) => overlay.remove());
+               console.log("ARScene: Attempted to remove MindAR UI overlays.");
+            }, 100); // Pequeño delay para asegurar que A-Frame/MindAR hayan terminado su ciclo
+         };
+      }
+   }, [pointData?.targetSrc]); // Dependencia clave
 
    if (!pointData || !pointData.targetSrc) {
-      // Asegurarse que hay un target
-      console.warn("ARScene: No pointData or targetSrc provided.");
+      // ... (manejo de error si no hay pointData)
       return (
-         <div className="ar-container">
-            <p>Error: No se pudo cargar la experiencia AR. Faltan datos.</p>
-            <button onClick={onClose} className="ar-close-button">
-               Cerrar
-            </button>
+         <div>
+            Error AR: Faltan datos. <button onClick={onClose}>Cerrar</button>
          </div>
       );
    }
 
-   // Usar una 'key' en a-scene puede ayudar a React a tratarla como una instancia completamente nueva
-   // si pointData.targetSrc cambia, lo que puede ser más limpio para A-Frame/MindAR.
    return (
       <div className="ar-container">
          <button onClick={onClose} className="ar-close-button">
             Cerrar AR
          </button>
          <a-scene
-            key={pointData.targetSrc} // Fuerza re-montaje si el target cambia
+            key={pointData.targetSrc} // Fuerza re-montaje
             ref={sceneRef}
-            mindar-image={`imageTargetSrc: ${pointData.targetSrc}; autoStart: true; uiScanning: yes; uiLoading: yes; maxTrack: 1;`}
+            mindar-image={`imageTargetSrc: ${pointData.targetSrc}; autoStart: true; uiScanning: yes; uiLoading: yes; maxTrack: 1; filterMinCF:0.001; filterBeta: 10; warmupTolerance: 2; missTolerance: 2;`}
             color-space="sRGB"
             renderer="colorManagement: true, physicallyCorrectLights"
             vr-mode-ui="enabled: false"
             device-orientation-permission-ui="enabled: false"
-            embedded // Importante para que no tome toda la pantalla si no quieres
-            style={{ width: "100%", height: "100%" }} // Asegura que ocupe el contenedor
+            embedded
+            style={{ width: "100%", height: "100%" }}
+            loading-screen="enabled: false" // Intenta deshabilitar la pantalla de carga de A-Frame
          >
+            {/* ... (a-assets, a-camera, a-entity) ... */}
             <a-assets>
                <a-asset-item id={`targetModel-${pointData.targetSrc}`} src={pointData.modelSrc}></a-asset-item>
             </a-assets>
-
             <a-camera position="0 0 0" look-controls="enabled: false" cursor="fuse: false; rayOrigin: mouse;" active="true"></a-camera>
-
             <a-entity mindar-image-target="targetIndex: 0">
                <a-gltf-model
+                  id={`model-${pointData.targetSrc}`} // Darle un ID para referenciarlo
                   rotation={pointData.rotation || "0 0 0"}
                   position={pointData.position || "0 0 0"}
                   scale={pointData.scale || "1 1 1"}
                   src={`#targetModel-${pointData.targetSrc}`}
-                  animation-mixer
+                  // Quitar animation-mixer si no tienes animaciones definidas en el GLB que quieras usar
+                  // animation-mixer
+
+                  // Añadir animación de A-Frame
+                  animation="property: rotation; to: 0 360 0; loop: true; dur: 10000; easing: linear; startEvents: model-loaded"
+                  // 'model-loaded' es un evento que A-Frame dispara para gltf-model cuando está listo
+                  // Otra opción para startEvents: 'targetFound' (si quieres que empiece a animar cuando se detecta el target)
+                  // O si el modelo ya tiene una animación llamada "spin" dentro del GLB:
+                  // animation-mixer="clip: spin; loop: repeat"
                ></a-gltf-model>
             </a-entity>
          </a-scene>
