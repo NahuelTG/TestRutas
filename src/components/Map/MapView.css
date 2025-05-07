@@ -1,0 +1,136 @@
+/* src/components/Map/MapView.css */
+
+/* Estilo base para marcadores personalizados */
+.custom-marker {
+   width: 30px; /* Coincide con JS */
+   height: 30px; /* Coincide con JS */
+   border-radius: 50%; /* Para hacerlos circulares si quieres */
+   cursor: pointer;
+   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+   /* La imagen de fondo se establece en JS */
+}
+
+/* Estilos específicos si necesitas diferenciar más allá de la imagen */
+.marker-ar {
+   /* background-color: rgba(0, 150, 255, 0.7); */ /* Color si la imagen no carga */
+   /* border: 2px solid rgb(0, 100, 180); */
+}
+
+.marker-audio {
+   /* background-color: rgba(0, 200, 100, 0.7); */ /* Color si la imagen no carga */
+   /* border: 2px solid rgb(0, 130, 80); */
+}
+
+/* Estilo para el marcador de audio cuando está reproduciendo */
+.custom-marker.playing {
+   /* box-shadow: 0 0 12px 4px #28a745;  Verde brillante */
+   animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+   0% {
+      transform: scale(1);
+      box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.7);
+   }
+   70% {
+      transform: scale(1.1);
+      box-shadow: 0 0 10px 15px rgba(40, 167, 69, 0);
+   }
+   100% {
+      transform: scale(1);
+      box-shadow: 0 0 0 0 rgba(40, 167, 69, 0);
+   }
+}
+
+/* Estilos para el contenido del Popup (si el default de Mapbox no es suficiente) */
+.mapboxgl-popup-custom-content {
+   padding: 15px;
+   font-family: "Arial", sans-serif;
+   border-radius: 8px;
+   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+   background-color: white;
+   min-width: 200px; /* Asegura un ancho mínimo */
+}
+
+.mapboxgl-popup-custom-content h4 {
+   margin: 0 0 8px 0;
+   font-size: 1.2em;
+   color: #333;
+}
+
+.mapboxgl-popup-custom-content p {
+   margin: 0 0 12px 0;
+   font-size: 0.95em;
+   color: #555;
+   line-height: 1.4;
+}
+
+.popup-action-button {
+   background-color: #007bff;
+   color: white;
+   border: none;
+   padding: 10px 15px;
+   border-radius: 5px;
+   cursor: pointer;
+   font-size: 1em;
+   width: 100%;
+   transition: background-color 0.2s ease;
+   text-align: center;
+}
+
+.popup-action-button:hover {
+   background-color: #0056b3;
+}
+
+/* Para asegurar que el popup no se oculte por el PWABadge u otros elementos */
+.mapboxgl-popup {
+   z-index: 10; /* Ajusta según sea necesario, debe ser menor que elementos fijos como el PWABadge si este está encima */
+}
+
+.custom-marker-wrapper {
+   /* Puedes añadir sombras, etc. aquí si el SVG no las tiene */
+   /* filter: drop-shadow(2px 2px 2px rgba(0,0,0,0.3)); */
+   display: flex; /* Ayuda a centrar si el SVG es más pequeño que el wrapper */
+   align-items: center;
+   justify-content: center;
+}
+
+.custom-marker-wrapper svg {
+   display: block; /* Evita espacio extra debajo del SVG */
+   /* Cualquier estilo adicional para el SVG mismo,
+     aunque es mejor controlarlo con props en el componente SVG */
+}
+
+/* Estilo para el marcador de audio SVG cuando está reproduciendo */
+.custom-marker-wrapper.playing-svg svg {
+   animation: pulse-svg 1.5s infinite;
+   /* Podrías cambiar el fill de una parte específica del SVG si le pones una clase */
+}
+
+/* O, si quieres cambiar una propiedad del SVG directamente */
+.custom-marker-wrapper.playing-svg svg path[fill="green"] {
+   /* Asumiendo que el color base es green */
+   /* fill: lime !important;  // Ejemplo, puede ser más específico */
+}
+
+@keyframes pulse-svg {
+   0% {
+      transform: scale(1);
+   }
+   50% {
+      transform: scale(1.15);
+   }
+   100% {
+      transform: scale(1);
+   }
+}
+
+/* ... (tus otros estilos de popup se mantienen) ... */
+.mapboxgl-popup-custom-content {
+   padding: 15px;
+   font-family: "Arial", sans-serif;
+   border-radius: 8px;
+   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+   background-color: white;
+   min-width: 200px;
+}

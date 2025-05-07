@@ -1,0 +1,27 @@
+/* src/components/AR/ARScene.css */
+.ar-container {
+   width: 100%;
+   height: 100%;
+   position: relative; /* Para el botón de cerrar */
+}
+
+.ar-close-button {
+   position: absolute;
+   top: 20px;
+   right: 20px;
+   padding: 10px 15px;
+   background-color: rgba(0, 0, 0, 0.5);
+   color: white;
+   border: none;
+   border-radius: 5px;
+   cursor: pointer;
+   z-index: 10; /* Asegurar que esté sobre la escena AR */
+   font-size: 1em;
+}
+
+.ar-close-button:hover {
+   background-color: rgba(0, 0, 0, 0.8);
+}
+
+/* MindAR por defecto añade su propia UI para escanear, etc. Puedes ocultarla o estilizarla si es necesario */
+/* .mindar-ui-overlay.mindar-ui-scanning .anchor:nth-child(1) .message, etc. */
