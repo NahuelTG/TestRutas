@@ -5,8 +5,8 @@ import mapboxgl from "mapbox-gl"; // mapboxgl ya incluye GeolocateControl
 import "mapbox-gl/dist/mapbox-gl.css";
 import "./MapView.css";
 
-import { AR as ARÍcono } from "../../assets/icons/AR";
-import { Audio as AudioÍcono } from "../../assets/icons/Audio";
+import { AR as ARÍcono } from "../../../public/assets/icons/AR";
+import { Audio as AudioÍcono } from "../../../public/assets/icons/Audio";
 
 const MapView = ({
    mapboxToken,
