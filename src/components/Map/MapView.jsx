@@ -24,6 +24,7 @@ const MapView = ({
    const buttonListenersRef = useRef({});
    const geolocateControlRef = useRef(null); // Para guardar la instancia del control de geolocalización
    const [mapLoaded, setMapLoaded] = useState(false);
+   const activatedPointsRef = useRef(new Set());
 
    const updatePopupButtonText = useCallback(
       /* ... (sin cambios) ... */ (pointId, isPlaying) => {
@@ -76,11 +77,48 @@ const MapView = ({
       geolocateControlRef.current = geolocate; // Guardar referencia si necesitas interactuar con él
 
       // Opcional: Escuchar eventos del GeolocateControl
+
       geolocate.on("geolocate", (e) => {
-         console.log("Geolocalización exitosa:", e.coords);
-         // Aquí podrías hacer algo con la ubicación del usuario, como guardarla en un estado,
-         // o calcular la distancia a los puntos de interés.
+         const userLat = e.coords.latitude;
+         const userLng = e.coords.longitude;
+         const MAX_DISTANCE_METERS = 50;
+
+         const haversineDistance = (lat1, lon1, lat2, lon2) => {
+            const R = 6371e3;
+            const toRad = (x) => (x * Math.PI) / 180;
+            const dLat = toRad(lat2 - lat1);
+            const dLon = toRad(lon2 - lon1);
+            const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c;
+         };
+
+         let closestPoint = null;
+         let minDistance = Infinity;
+
+         for (const point of points) {
+            if (point.type !== "audio" || !point.coordinates) continue;
+            if (activatedPointsRef.current.has(point.id)) continue;
+
+            const [lng, lat] = point.coordinates;
+            const distance = haversineDistance(userLat, userLng, lat, lng);
+
+            if (distance < MAX_DISTANCE_METERS && distance < minDistance) {
+               closestPoint = point;
+               minDistance = distance;
+            }
+         }
+
+         if (closestPoint && closestPoint.id !== currentlyPlayingAudioPointId) {
+            activatedPointsRef.current.add(closestPoint.id);
+            console.log(
+               `MapView: Audio '${closestPoint.name}' detectado por proximidad (${minDistance.toFixed(1)}m). Solicitando reproducción.`
+            );
+            // MODIFICACIÓN AQUÍ: Pasa un objeto de opciones
+            onPopupAction(closestPoint, { isProximity: true });
+         }
       });
+
       geolocate.on("error", (e) => {
          console.error("Error de geolocalización:", e.message);
          // Informar al usuario que la geolocalización falló o no está disponible.
@@ -91,7 +129,7 @@ const MapView = ({
 
       map.on("load", () => {
          // Disparar la geolocalización automáticamente al cargar el mapa (opcional)
-         // geolocate.trigger(); // Descomenta si quieres que intente localizar al usuario al inicio
+         geolocate.trigger(); // Descomenta si quieres que intente localizar al usuario al inicio
 
          points.forEach((point) => {
             // ... (código de creación de marcadores y popups sin cambios) ...

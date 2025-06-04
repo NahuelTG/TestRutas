@@ -1,31 +1,50 @@
-import { useState, useCallback, useEffect } from "react";
-import { Howl } from "howler";
-import MapView from "./components/Map/MapView"; // Ajusta la ruta
-import ARScene from "./components/AR/ARScene"; // Ajusta la ruta
-import pointsData from "./data/pointsData.json"; // Ajusta la ruta
-import PWABadge from "./PWABadge.jsx"; // Si lo usas
+// src/App.jsx
+import { useState, useCallback, useEffect, useRef } from "react"; // Importar useRef
+import { Howl, Howler } from "howler";
+import MapView from "./components/Map/MapView";
+import ARScene from "./components/AR/ARScene";
+import pointsData from "./data/pointsData.json";
+import PWABadge from "./PWABadge.jsx";
 import "./App.css";
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN || "TU_TOKEN_DE_FALLBACK_SI_NO_HAY_ENV";
 
 if (MAPBOX_TOKEN === "TU_TOKEN_DE_FALLBACK_SI_NO_HAY_ENV" || !MAPBOX_TOKEN) {
-   console.warn("App.jsx: Mapbox token no configurado. Por favor, establece VITE_MAPBOX_ACCESS_TOKEN en tu archivo .env");
+   console.warn("App.jsx: Mapbox token no configurado...");
 }
+
+const LOCAL_STORAGE_ROUTE_STARTED_KEY = "routeHasBeenStarted";
 
 function App() {
    const [currentView, setCurrentView] = useState("map");
-   const [pointForPopup, setPointForPopup] = useState(null); // Punto para el cual mostrar el popup
-   const [activeActionPoint, setActiveActionPoint] = useState(null); // Punto para el cual ejecutar la acción AR/Audio
+   const [pointForPopup, setPointForPopup] = useState(null);
+   const [activeActionPoint, setActiveActionPoint] = useState(null);
 
    const [audioInstance, setAudioInstance] = useState(null);
    const [isPlayingAudioForPointId, setIsPlayingAudioForPointId] = useState(null);
 
+   const [isAudioUnlocked, setIsAudioUnlocked] = useState(false);
+   const [pendingProximityAudioPoint, setPendingProximityAudioPoint] = useState(null);
+   const [hasStartedRoute, setHasStartedRoute] = useState(false);
+   const [loadingInitialState, setLoadingInitialState] = useState(true);
+
+   // Ref para evitar múltiples llamadas a playAudio en el ciclo de StrictMode
+   const isPlayingRef = useRef(false);
+
+   useEffect(() => {
+      console.log("App.jsx (useEffect - Carga Inicial): Leyendo localStorage.");
+      // No establecemos hasStartedRoute aquí. El botón siempre aparecerá inicialmente.
+      // El texto del botón se basará en localStorage.
+      setLoadingInitialState(false);
+   }, []);
+
    const stopAndUnloadAudio = useCallback(
       (notifyPlayingState = true) => {
          if (audioInstance) {
-            console.log("App.jsx: Deteniendo y descargando audio.");
+            console.log("App.jsx (stopAndUnloadAudio): Deteniendo y descargando audio.", audioInstance);
+            isPlayingRef.current = false; // Marcar que ya no está sonando
             audioInstance.stop();
-            audioInstance.unload(); // Importante para liberar recursos
+            audioInstance.unload();
             setAudioInstance(null);
             if (notifyPlayingState) {
                setIsPlayingAudioForPointId(null);
@@ -35,9 +54,9 @@ function App() {
       [audioInstance]
    );
 
-   // Limpieza general del audio si el componente App se desmontara
    useEffect(() => {
       return () => {
+         console.log("App.jsx (useEffect - Cleanup): Desmontando App, deteniendo audio.");
          if (audioInstance) {
             stopAndUnloadAudio(true);
          }
@@ -45,104 +64,291 @@ function App() {
    }, [audioInstance, stopAndUnloadAudio]);
 
    const handleMarkerClick = useCallback((point) => {
-      console.log("App.jsx: Clic en MARCADOR, estableciendo pointForPopup:", point.id);
+      console.log("App.jsx (handleMarkerClick): Clic en MARCADOR:", point.id);
       setPointForPopup(point);
-      // No se ejecuta ninguna acción aquí, solo se muestra el popup
    }, []);
 
-   const handlePopupAction = useCallback(
-      (point) => {
-         console.log("App.jsx: Clic en BOTÓN del POPUP para:", point.id);
-         setActiveActionPoint(point); // Marcar este punto para la acción
-         // setPointForPopup(point); // Asegurar que el popup correcto sigue activo (ya debería estarlo)
+   const tryUnlockAudioContext = useCallback(() => {
+      console.log("App.jsx (tryUnlockAudioContext): Intentando desbloquear. isAudioUnlocked:", isAudioUnlocked);
+      if (isAudioUnlocked) {
+         console.log("App.jsx (tryUnlockAudioContext): Audio ya está desbloqueado.");
+         return;
+      }
 
-         if (point.type === "audio") {
-            if (isPlayingAudioForPointId === point.id && audioInstance) {
-               console.log("App.jsx: Deteniendo audio (toggle) para:", point.name);
-               stopAndUnloadAudio(true);
-               // No cambiamos pointForPopup aquí, para que el popup siga abierto y el texto del botón se actualice.
-            } else {
-               // Si hay otro audio sonando, detenerlo
-               if (audioInstance) {
-                  stopAndUnloadAudio(false); // Detener sin afectar isPlayingAudioForPointId inmediatamente
-               }
-               setCurrentView("map"); // Asegurar que estamos en la vista del mapa
-               console.log("App.jsx: Intentando reproducir audio para:", point.name, "src:", point.audioSrc);
-
-               const sound = new Howl({
-                  src: [point.audioSrc],
-                  html5: true, // Recomendado para compatibilidad web/móvil
-                  volume: 1.0,
-                  onload: () => {
-                     console.log(`App.jsx: Audio ${point.audioSrc} CARGADO.`);
-                     sound.play();
-                     setIsPlayingAudioForPointId(point.id); // Actualizar estado al reproducir
-                  },
-                  onplayerror: (id, err) => {
-                     console.error(`App.jsx: ERROR AL REPRODUCIR audio ID ${id}:`, err);
-                     setIsPlayingAudioForPointId(null);
-                     setAudioInstance(null);
-                     if (pointForPopup?.id === point.id) setPointForPopup(null); // Cerrar popup si falla
-                     setActiveActionPoint(null);
-                  },
-                  onloaderror: (id, err) => {
-                     console.error(`App.jsx: ERROR AL CARGAR audio ID ${id}:`, err);
-                     setIsPlayingAudioForPointId(null);
-                     setAudioInstance(null);
-                     if (pointForPopup?.id === point.id) setPointForPopup(null); // Cerrar popup si falla
-                     setActiveActionPoint(null);
-                  },
-                  onend: () => {
-                     console.log(`App.jsx: Audio ${point.audioSrc} finalizado.`);
-                     setIsPlayingAudioForPointId(null);
-                     setAudioInstance(null);
-                     if (pointForPopup?.id === point.id) setPointForPopup(null); // Cerrar popup al finalizar
-                     setActiveActionPoint(null);
-                  },
-                  onstop: () => {
-                     // Se llama cuando se usa .stop()
-                     console.log(`App.jsx: Audio ${point.audioSrc} detenido (onstop).`);
-                     // setIsPlayingAudioForPointId(null) ya se maneja en stopAndUnloadAudio
-                  },
-               });
-               setAudioInstance(sound);
-            }
-         } else if (point.type === "ar") {
-            if (audioInstance) {
-               stopAndUnloadAudio(true);
-            }
-            setIsPlayingAudioForPointId(null);
-            setCurrentView("ar"); // Cambia a la vista AR
-            // El popup se irá porque MapView se desmonta/oculta.
-            // No es necesario setPointForPopup(null) aquí si la vista cambia.
+      const unlockWithSilentSound = () => {
+         console.log("App.jsx (tryUnlockAudioContext): Intentando con sonido silencioso.");
+         // Prevenir múltiples sonidos de desbloqueo si ya hay uno en curso (raro, pero por si acaso)
+         if (
+            Howler._howls.some((h) => h._src === "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA")
+         ) {
+            console.log("App.jsx (tryUnlockAudioContext): Sonido de desbloqueo ya en progreso o existe.");
+            return;
          }
+         const unlockSound = new Howl({
+            src: ["data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA"],
+            volume: 0.01,
+            html5: true,
+            onplay: () => {
+               console.log("App.jsx (tryUnlockAudioContext): Sonido de desbloqueo REPRODUCIDO. Estableciendo isAudioUnlocked = true.");
+               setIsAudioUnlocked(true);
+               unlockSound.unload();
+            },
+            onplayerror: (id, err) => {
+               console.error("App.jsx (tryUnlockAudioContext): ERROR al REPRODUCIR sonido de desbloqueo:", err);
+               unlockSound.unload();
+            },
+            onloaderror: (id, err) => {
+               console.error("App.jsx (tryUnlockAudioContext): ERROR al CARGAR sonido de desbloqueo:", err);
+               unlockSound.unload();
+            },
+         });
+         unlockSound.play();
+      };
+
+      if (Howler.ctx) {
+         if (Howler.ctx.state === "suspended") {
+            console.log("App.jsx (tryUnlockAudioContext): AudioContext 'suspended'. Intentando resume().");
+            Howler.ctx
+               .resume()
+               .then(() => {
+                  console.log("App.jsx (tryUnlockAudioContext): AudioContext RESUMIDO. Estableciendo isAudioUnlocked = true.");
+                  setIsAudioUnlocked(true);
+               })
+               .catch((e) => {
+                  console.error("App.jsx (tryUnlockAudioContext): Error al resumir:", e, ". Fallback a sonido silencioso.");
+                  unlockWithSilentSound();
+               });
+         } else if (Howler.ctx.state === "running") {
+            console.log("App.jsx (tryUnlockAudioContext): AudioContext 'running'. Estableciendo isAudioUnlocked = true.");
+            setIsAudioUnlocked(true);
+         } else {
+            console.log("App.jsx (tryUnlockAudioContext): Howler.ctx.state es:", Howler.ctx.state, ". Intentando con sonido silencioso.");
+            unlockWithSilentSound();
+         }
+      } else {
+         console.log("App.jsx (tryUnlockAudioContext): Howler.ctx no existe. Intentando con sonido silencioso.");
+         unlockWithSilentSound();
+      }
+   }, [isAudioUnlocked]);
+
+   const playAudio = useCallback(
+      (point) => {
+         console.log(
+            `App.jsx (playAudio): Solicitud para punto '${point.name}'. hasStartedRoute: ${hasStartedRoute}, isAudioUnlocked: ${isAudioUnlocked}, isPlayingRef: ${isPlayingRef.current}`
+         );
+
+         if (!hasStartedRoute) {
+            console.warn(`App.jsx (playAudio): Ruta no iniciada. No se reproduce '${point.name}'.`);
+            if (!pendingProximityAudioPoint || pendingProximityAudioPoint.id !== point.id) {
+               setPendingProximityAudioPoint(point);
+            }
+            return;
+         }
+         if (!isAudioUnlocked) {
+            console.warn(`App.jsx (playAudio): Audio bloqueado. No se reproduce '${point.name}'. Guardando como pendiente.`);
+            if (!pendingProximityAudioPoint || pendingProximityAudioPoint.id !== point.id) {
+               setPendingProximityAudioPoint(point);
+            }
+            return;
+         }
+
+         // Toggle para detener el audio actual
+         if (isPlayingAudioForPointId === point.id && audioInstance) {
+            console.log("App.jsx (playAudio): Deteniendo audio (toggle) para:", point.name);
+            stopAndUnloadAudio(true);
+            return;
+         }
+
+         // Detener audio anterior si es diferente
+         if (audioInstance) {
+            console.log("App.jsx (playAudio): Deteniendo audio anterior antes de reproducir:", point.name);
+            stopAndUnloadAudio(false); // No actualizar isPlayingAudioForPointId todavía
+         }
+
+         // Prevenir que se cree un nuevo Howl si ya estamos en proceso de reproducir este mismo punto (debido a StrictMode)
+         if (isPlayingRef.current && isPlayingAudioForPointId === point.id) {
+            console.warn(`App.jsx (playAudio): Ya se está intentando reproducir '${point.name}'. Abortando duplicado.`);
+            return;
+         }
+
+         console.log("App.jsx (playAudio): Creando Howl para:", point.name, "src:", point.audioSrc);
+         isPlayingRef.current = true; // Marcar que estamos intentando reproducir
+
+         const sound = new Howl({
+            src: [point.audioSrc],
+            html5: true,
+            volume: 1.0,
+            onload: () => {
+               console.log(`App.jsx (playAudio): Audio '${point.name}' CARGADO. Intentando play().`);
+               sound.play();
+            },
+            onplay: () => {
+               console.log(`App.jsx (playAudio - ONPLAY): Audio '${point.name}' COMENZÓ.`);
+               isPlayingRef.current = true; // Confirmar que está sonando
+               setIsPlayingAudioForPointId(point.id);
+               if (pendingProximityAudioPoint && pendingProximityAudioPoint.id === point.id) {
+                  console.log("App.jsx (playAudio - ONPLAY): Limpiando pendiente:", point.name);
+                  setPendingProximityAudioPoint(null);
+               }
+            },
+            onplayerror: (id, err) => {
+               console.error(`App.jsx (playAudio - ONPLAYERROR): ERROR REPRODUCIENDO '${point.name}' (ID ${id}):`, err);
+               isPlayingRef.current = false;
+               setIsPlayingAudioForPointId(null);
+               setAudioInstance((prev) => (prev === sound ? null : prev)); // Solo limpiar si es esta instancia
+               if (pointForPopup?.id === point.id) setPointForPopup(null);
+               setActiveActionPoint(null);
+            },
+            onloaderror: (id, err) => {
+               console.error(`App.jsx (playAudio - ONLOADERROR): ERROR CARGANDO '${point.name}' (ID ${id}):`, err);
+               isPlayingRef.current = false;
+               if (pendingProximityAudioPoint?.id === point.id) setPendingProximityAudioPoint(null);
+            },
+            onend: () => {
+               console.log(`App.jsx (playAudio - ONEND): Audio '${point.name}' finalizado.`);
+               isPlayingRef.current = false;
+               setIsPlayingAudioForPointId(null);
+               setAudioInstance((prev) => (prev === sound ? null : prev));
+               if (pointForPopup?.id === point.id) setPointForPopup(null);
+               setActiveActionPoint(null);
+            },
+            onstop: () => {
+               // Se llama cuando se usa .stop()
+               console.log(`App.jsx (playAudio - ONSTOP): Audio '${point.name}' detenido.`);
+               isPlayingRef.current = false;
+               // No setear isPlayingAudioForPointId a null aquí, stopAndUnloadAudio lo hace.
+            },
+         });
+         setAudioInstance(sound);
       },
-      [audioInstance, isPlayingAudioForPointId, stopAndUnloadAudio, pointForPopup]
+      [
+         audioInstance,
+         isPlayingAudioForPointId,
+         stopAndUnloadAudio,
+         isAudioUnlocked,
+         pendingProximityAudioPoint,
+         pointForPopup,
+         hasStartedRoute,
+      ]
    );
 
-   const handleCloseAR = useCallback(() => {
-      setCurrentView("map");
-      setPointForPopup(null); // Cerrar cualquier popup al volver de AR
-      setActiveActionPoint(null); // Limpiar el punto de acción AR
-   }, []);
+   const handlePopupAction = useCallback(
+      (point, options = {}) => {
+         const isProximityTrigger = options.isProximity || false;
+         console.log(
+            `App.jsx (handlePopupAction): Acción para '${point.name}'. Proximidad: ${isProximityTrigger}, Ruta iniciada: ${hasStartedRoute}, Audio desbloqueado: ${isAudioUnlocked}`
+         );
 
-   if (!MAPBOX_TOKEN || MAPBOX_TOKEN === "TU_TOKEN_DE_FALLBACK_SI_NO_HAY_ENV") {
+         // Si no es por proximidad (es un clic) e intentamos desbloquear
+         if (!isProximityTrigger && !isAudioUnlocked) {
+            console.log("App.jsx (handlePopupAction): Clic en popup. Llamando a tryUnlockAudioContext().");
+            tryUnlockAudioContext();
+         }
+
+         setActiveActionPoint(point);
+
+         if (point.type === "audio") {
+            playAudio(point);
+         } else if (point.type === "ar") {
+            if (audioInstance) stopAndUnloadAudio(true);
+            setIsPlayingAudioForPointId(null);
+            setPendingProximityAudioPoint(null);
+            setCurrentView("ar");
+         }
+      },
+      [
+         audioInstance,
+         isAudioUnlocked,
+         playAudio,
+         tryUnlockAudioContext,
+         hasStartedRoute,
+         stopAndUnloadAudio, // Agregado stopAndUnloadAudio
+      ]
+   );
+
+   useEffect(() => {
+      console.log(
+         `App.jsx (useEffect - Audio Pendiente Check): hasStartedRoute: ${hasStartedRoute}, isAudioUnlocked: ${isAudioUnlocked}, Pending: ${
+            pendingProximityAudioPoint?.name || "ninguno"
+         }, isPlayingRef: ${isPlayingRef.current}`
+      );
+      if (hasStartedRoute && isAudioUnlocked && pendingProximityAudioPoint && !isPlayingRef.current) {
+         console.log(
+            "App.jsx (useEffect - Audio Pendiente): Condiciones cumplidas. Intentando reproducir pendiente:",
+            pendingProximityAudioPoint.name
+         );
+         playAudio(pendingProximityAudioPoint);
+      }
+   }, [hasStartedRoute, isAudioUnlocked, pendingProximityAudioPoint, playAudio]);
+
+   const handleStartOrContinueRoute = useCallback(() => {
+      console.log("App.jsx (handleStartOrContinueRoute): Botón presionado.");
+      if (!hasStartedRoute) {
+         setHasStartedRoute(true); // Esto ocultará el botón
+      }
+      localStorage.setItem(LOCAL_STORAGE_ROUTE_STARTED_KEY, "true");
+      console.log("App.jsx (handleStartOrContinueRoute): Llamando a tryUnlockAudioContext().");
+      tryUnlockAudioContext();
+      // El useEffect [hasStartedRoute, isAudioUnlocked, pendingProximityAudioPoint] se encargará del audio pendiente
+   }, [hasStartedRoute, tryUnlockAudioContext]);
+
+   const handleCloseAR = useCallback(() => {
+      /* ... sin cambios ... */
+   });
+
+   if (loadingInitialState) {
       return (
-         <div style={{ padding: "20px", textAlign: "center", fontSize: "1.2em" }}>
-            Error: El token de acceso de Mapbox no está configurado correctamente.
-            <br />
-            Por favor, asegúrate de tener la variable de entorno <code>VITE_MAPBOX_ACCESS_TOKEN</code> definida en tu archivo{" "}
-            <code>.env</code>.
+         <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh", fontSize: "1.5em" }}>
+            Cargando...
          </div>
       );
    }
 
+   if (!MAPBOX_TOKEN || MAPBOX_TOKEN === "TU_TOKEN_DE_FALLBACK_SI_NO_HAY_ENV") {
+      console.log("No hay token");
+   }
+
+   const routePreviouslyStartedInLocalStorage = localStorage.getItem(LOCAL_STORAGE_ROUTE_STARTED_KEY) === "true";
+   const showStartButton = !hasStartedRoute; // El botón se muestra si `hasStartedRoute` es false
+
    return (
       <div className="App">
+         {showStartButton && (
+            <div className="start-route-overlay">
+               {" "}
+               {/* Añade una clase para estilizar el overlay */}
+               <div className="start-route-box">
+                  {" "}
+                  {/* Caja interna para contenido */}
+                  <h1>{routePreviouslyStartedInLocalStorage ? "Bienvenido de Nuevo" : "Bienvenido"}</h1>
+                  <p>
+                     {routePreviouslyStartedInLocalStorage
+                        ? "Presiona para continuar tu ruta y habilitar el audio automático."
+                        : "Presiona para comenzar tu ruta guiada por audio."}
+                  </p>
+                  <button onClick={handleStartOrContinueRoute}>
+                     {routePreviouslyStartedInLocalStorage ? "Continuar Ruta" : "Comenzar Ruta"}
+                  </button>
+                  {pendingProximityAudioPoint && !isAudioUnlocked && (
+                     <p className="pending-audio-notice">
+                        Punto de audio cercano: {pendingProximityAudioPoint.name}.<br /> Se activará al presionar el botón.
+                     </p>
+                  )}
+               </div>
+            </div>
+         )}
+
+         {hasStartedRoute && pendingProximityAudioPoint && !isAudioUnlocked && (
+            <div className="audio-blocked-notice">
+               Audio cercano ({pendingProximityAudioPoint.name}). El audio automático podría estar pausado. Intenta hacer clic en
+               "Reproducir Sonido&quot; en un punto del mapa.
+            </div>
+         )}
+
          {currentView === "map" && (
             <MapView
-               mapboxToken={MAPBOX_TOKEN}
-               points={pointsData}
+               mapboxToken={MAPBOX_TOKEN} // Asegúrate que MAPBOX_TOKEN es el correcto
+               points={pointsData} // <<--- AÑADE ESTO
                onMarkerClick={handleMarkerClick}
                onPopupAction={handlePopupAction}
                currentlyPlayingAudioPointId={isPlayingAudioForPointId}
