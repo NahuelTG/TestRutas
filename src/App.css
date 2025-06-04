@@ -22,3 +22,70 @@ body {
    right: 1rem;
    z-index: 1000; /* Asegurar que esté encima */
 }
+
+.start-route-overlay {
+   position: fixed;
+   top: 0;
+   left: 0;
+   width: 100%;
+   height: 100%;
+   background-color: rgba(0, 0, 0, 0.5); /* Fondo semi-transparente */
+   display: flex;
+   justify-content: center;
+   align-items: center;
+   z-index: 2000; /* Encima del mapa */
+}
+
+.start-route-box {
+   background-color: white;
+   padding: 30px 40px;
+   border-radius: 8px;
+   box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+   text-align: center;
+   max-width: 90%;
+}
+
+.start-route-box h1 {
+   margin-top: 0;
+   margin-bottom: 15px;
+}
+
+.start-route-box p {
+   margin-bottom: 20px;
+   line-height: 1.6;
+}
+
+.start-route-box button {
+   padding: 12px 25px;
+   font-size: 16px;
+   cursor: pointer;
+   background-color: #007bff;
+   color: white;
+   border: none;
+   border-radius: 5px;
+   transition: background-color 0.2s ease;
+}
+
+.start-route-box button:hover {
+   background-color: #0056b3;
+}
+
+.pending-audio-notice {
+   margin-top: 15px;
+   font-size: 0.9em;
+   color: #555;
+}
+
+.audio-blocked-notice {
+   padding: 10px;
+   background-color: orange;
+   color: black;
+   text-align: center;
+   position: fixed;
+   top: 0; /* O donde quieras posicionarlo, ej. debajo de un header */
+   left: 0;
+   width: 100%;
+   z-index: 1000; /* Encima del mapa pero debajo del overlay de inicio */
+   box-sizing: border-box;
+   opacity: 0.9;
+}
